@@ -14,7 +14,7 @@ All data comes from free sources: SEC EDGAR for filings and XBRL financials, RSS
 
 - [x] Project setup, CI, SEC EDGAR client with caching
 - [x] Three-statement model and key ratios from XBRL company facts
-- [ ] Excel export with ratios and highlighting
+- [x] Excel export with live ratio formulas and highlighting
 - [ ] Streamlit app
 - [ ] Company overview with LLM summary
 - [ ] News and sentiment (FinBERT + LLM mood tags)
@@ -42,7 +42,16 @@ from tenk.financials.ratios import compute_ratios
 statements = build_statements(edgar.company_facts(edgar.ticker_to_cik("AAPL")), years=5)
 print(statements.income)  # rows = line items, columns = fiscal year end dates
 print(compute_ratios(statements))  # margins, growth, ROE, current ratio, debt to equity
+
+from tenk.export.excel import write_workbook
+
+write_workbook(statements, "AAPL.xlsx")
 ```
+
+The workbook has a Summary sheet, the three statements in USD millions, a Ratios sheet
+built from live Excel formulas (green when a ratio improves on the prior year, red when it
+gets worse), a balance sheet check row, and a Sources sheet with the XBRL tag behind every
+number.
 
 Companies tag the same line item differently in XBRL, and many changed tags over time.
 `src/tenk/financials/xbrl_map.py` lists fallback tags per line item; for each year the
@@ -57,5 +66,6 @@ src/tenk/
   cache.py         SQLite cache for API responses
   sources/edgar.py SEC EDGAR client (ticker lookup, filings, XBRL company facts)
   financials/      XBRL tag map, three statements, ratios
+  export/excel.py  three-statement Excel workbook
 tests/             offline tests against recorded EDGAR responses
 ```
