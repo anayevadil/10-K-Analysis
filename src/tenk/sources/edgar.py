@@ -27,6 +27,7 @@ COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.js
 ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
 
 ONE_DAY = 24 * 60 * 60
+ONE_YEAR = 365 * ONE_DAY  # filed documents never change
 MAX_REQUESTS_PER_SECOND = 10
 
 
@@ -96,6 +97,19 @@ class EdgarClient:
         self.cache.set(url, data, ttl_seconds)
         return data
 
+    def _get_text(self, url: str, ttl_seconds: float = ONE_DAY) -> str:
+        cached = self.cache.get(url)
+        if cached is not None:
+            return cached
+        self._throttle()
+        response = self.session.get(url, timeout=60)
+        if response.status_code == 404:
+            raise EdgarError(f"Not found on EDGAR: {url}")
+        response.raise_for_status()
+        text = response.text
+        self.cache.set(url, text, ttl_seconds)
+        return text
+
     # --- lookups ---------------------------------------------------------
 
     def ticker_to_cik(self, ticker: str) -> int:
@@ -158,6 +172,10 @@ class EdgarClient:
             if len(found) == limit:
                 break
         return found
+
+    def filing_document(self, filing: Filing) -> str:
+        """The filing's primary document as HTML (cached; filed documents never change)."""
+        return self._get_text(filing.url, ttl_seconds=ONE_YEAR)
 
     def latest_10k(self, ticker: str) -> Filing:
         filings = self.filings(ticker, form="10-K", limit=1)

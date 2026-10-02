@@ -88,3 +88,11 @@ def test_company_facts_not_found(client):
         mock.get(COMPANY_FACTS_URL.format(cik=1), status=404)
         with pytest.raises(EdgarError, match="Not found"):
             client.company_facts(1)
+
+
+def test_filing_document_is_fetched_once(client, edgar):
+    filing = client.latest_10k("AAPL")
+    edgar.get(filing.url, body="<html><body>10-K</body></html>")
+    assert client.filing_document(filing) == "<html><body>10-K</body></html>"
+    assert client.filing_document(filing) == "<html><body>10-K</body></html>"
+    assert sum(call.request.url == filing.url for call in edgar.calls) == 1
