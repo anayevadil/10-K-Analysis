@@ -129,3 +129,116 @@ def example_company_facts() -> dict:
         "PaymentsForRepurchaseOfCommonStock": _series("duration", {y: 20 * M for y in YEARS}),
     }
     return {"cik": 1234567, "entityName": "Example Corp", "facts": {"us-gaap": us_gaap}}
+
+
+def example_10k_sections() -> dict[str, str]:
+    """Business, Risk Factors and MD&A of Example Corp's fictional 2024 10-K.
+
+    Written to match ``example_company_facts`` so the agent's 10-K search and
+    its financial tools agree with each other in sample mode.
+    """
+    return {key: _unwrap(text) for key, text in _EXAMPLE_10K.items()}
+
+
+def _unwrap(text: str) -> str:
+    """One line per heading or paragraph, the way 10-K HTML converts to text."""
+    lines: list[str] = []
+    paragraph: list[str] = []
+    for line in text.strip().splitlines():
+        if line in _HEADINGS or line.startswith("Item "):
+            if paragraph:
+                lines.append(" ".join(paragraph))
+                paragraph = []
+            lines.append(line)
+            continue
+        paragraph.append(line)
+        if line.endswith("."):
+            lines.append(" ".join(paragraph))
+            paragraph = []
+    if paragraph:
+        lines.append(" ".join(paragraph))
+    return "\n".join(lines)
+
+
+_HEADINGS = {
+    "Overview",
+    "Products and segments",
+    "Customers",
+    "Competition",
+    "Suppliers",
+    "2024 compared with 2023",
+    "Liquidity and capital resources",
+    "Outlook",
+}
+
+
+_EXAMPLE_10K = {
+    "business": """
+Item 1. Business
+Overview
+Example Corp designs building sensors and sells the software that office landlords and
+facility managers use to monitor energy use, air quality and room bookings. We were founded
+in 2009 and are headquartered in Springfield. At December 31, 2024 we had about 3,100
+employees.
+Products and segments
+We report three revenue streams. Hardware: sensors, gateways and controllers sold to building
+owners, usually as part of a new construction or renovation project. Hardware revenue was
+$650 million in 2024, down from $660 million in 2023. Software subscriptions: annual or
+multi-year subscriptions to the Example Cloud dashboard, priced per square foot monitored.
+Subscription revenue was $520 million in 2024, up 24% from $420 million in 2023, and made up
+40% of total revenue. Services: installation, maintenance contracts and training, which
+brought in $130 million in 2024 compared with $120 million in 2023.
+Customers
+Our customers are commercial landlords, property managers, universities and hospitals. No
+single customer accounted for more than 6% of revenue in 2024. About 70% of revenue comes
+from North America and the rest from Europe.
+Competition
+We compete with large building-management companies that sell sensors together with
+heating and ventilation systems, and with smaller software start-ups. We believe customers
+choose us because our sensors work with most building systems and our software is simple to
+set up.
+Suppliers
+Our sensors use microcontrollers and radio chips from a small number of suppliers. We
+assemble products through two contract manufacturers in Mexico and Malaysia.
+""",
+    "risk_factors": """
+Item 1A. Risk Factors
+Demand for our hardware depends on office construction and renovation. When landlords
+delay new buildings or upgrades, sales of new sensors fall first. Office construction in
+our main markets slowed in 2024 and may slow further.
+We rely on a small number of chip suppliers. A shortage of microcontrollers or radio chips
+would delay deliveries to customers and raise our costs, as happened in 2021 and 2022.
+Our software stores data about buildings and the people in them. A security breach could
+expose customer data, lead to fines under privacy laws and cause customers to leave.
+Large building-management companies could bundle similar monitoring software with their
+heating and ventilation systems at little or no extra cost, which would put pressure on our
+subscription prices.
+We have $500 million of long-term notes due in 2028 and $50 million due within one year.
+Higher interest rates would increase the cost of refinancing this debt.
+About 30% of our revenue is earned in Europe, so a stronger US dollar reduces our reported
+revenue and profit.
+""",
+    "mdna": """
+Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations
+2024 compared with 2023
+Revenue increased 8.3% to $1,300 million from $1,200 million. Growth came from software
+subscriptions, which rose 24% to $520 million as customers added more buildings to Example
+Cloud. Hardware revenue declined 1.5% to $650 million because several landlords postponed
+renovation projects. Services revenue grew 8% to $130 million.
+Gross margin was 40.0%, unchanged from 2023. Higher-margin subscription revenue offset
+higher chip prices in hardware. Research and development expense rose to $130 million and
+selling, general and administrative expense rose to $195 million, both growing in line with
+revenue, so operating margin stayed at 15.0% and operating income rose to $195 million.
+Net income was $148 million, up from $136 million. Net income for 2023 has been restated from
+the $130 million first reported to $136 million to correct an error in the income tax
+provision; the correction did not affect revenue or operating income.
+Liquidity and capital resources
+Cash from operations was $198 million and capital expenditures were $60 million, leaving
+free cash flow of $138 million. We paid $30 million of dividends and repurchased $20 million
+of shares. Cash and equivalents were $300 million at year end, up from $280 million. Debt was
+unchanged at $500 million of long-term notes and $50 million due within one year.
+Outlook
+For 2025 we expect revenue growth of 6% to 8%, with subscriptions growing faster than
+hardware. We expect gross margin to stay close to 40%.
+""",
+}

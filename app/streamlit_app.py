@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -10,6 +11,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from tenk.agent.loop import AgentAnswer, Step, ask, saved_answers
+from tenk.agent.prompts import suggested_questions
+from tenk.agent.tools import Toolbox, edgar_resources, sample_resources
 from tenk.cache import JsonCache
 from tenk.export.excel import workbook_bytes
 from tenk.financials.ratios import PERCENT_RATIOS, RATIO_LABELS
@@ -24,6 +28,7 @@ from tenk.nlp.sentiment import (
 )
 from tenk.nlp.summarize import Overview, OverviewError
 from tenk.service import (
+    DEMO_TICKER,
     CompanyData,
     add_moods,
     find_moods,
@@ -267,6 +272,107 @@ def render_news(data: CompanyData) -> None:
     show_news(news)
 
 
+def describe_step(step: Step) -> str:
+    args = ", ".join(f"{k}={json.dumps(v)}" for k, v in step.input.items())
+    return f"`{step.tool}({args})`"
+
+
+def show_answer(answer: AgentAnswer) -> None:
+    st.markdown(answer.answer.replace("$", "\\$"))
+    calls = len(answer.steps)
+    label = f"How the agent got there: {calls} tool call{'s' if calls != 1 else ''}"
+    with st.expander(label):
+        if answer.model:
+            st.caption(
+                f"{answer.model} · {answer.model_calls} model calls · "
+                f"{answer.input_tokens:,} input and {answer.output_tokens:,} output tokens"
+            )
+        for number, step in enumerate(answer.steps, start=1):
+            status = " · failed" if step.is_error else ""
+            if step.seconds and not step.is_error:
+                status = f" · {step.seconds:.2f}s"
+            st.markdown(f"**Step {number}.** {describe_step(step)}{status}")
+            st.code(step.output[:2000], language="json" if not step.is_error else None)
+
+
+def agent_toolbox(data: CompanyData) -> Toolbox:
+    def news(company: CompanyData) -> NewsMood | None:
+        return find_moods(cached_news(company, company.ticker), result_cache())
+
+    def load(ticker: str):
+        if ticker.upper() == DEMO_TICKER:
+            return sample_resources()
+        edgar = EdgarClient(user_agent=sec_user_agent())
+        known = data if ticker.upper() == data.ticker else None
+        return edgar_resources(ticker, edgar, news, data=known)
+
+    return Toolbox(load)
+
+
+def render_agent(data: CompanyData) -> None:
+    st.subheader("Ask the analyst")
+    st.caption(
+        "An AI agent that answers questions with this app's own tools: the XBRL financials, "
+        "a search over the 10-K and the news scores. Every answer shows each step it took. "
+        "Not investment advice."
+    )
+    api_key = secret("ANTHROPIC_API_KEY")
+    if not api_key:
+        saved = saved_answers(data.ticker)
+        if not saved:
+            st.info(
+                "The agent needs an Anthropic API key (ANTHROPIC_API_KEY). Turn on sample data "
+                "to see saved answers."
+            )
+            return
+        st.info("Saved answers. Set ANTHROPIC_API_KEY to ask your own questions.")
+        if data.is_sample:
+            st.caption("Sample answers are written by hand; the tool steps are real outputs.")
+        for answer in saved:
+            with st.container(border=True):
+                st.markdown(f"**{md(answer.question)}**")
+                show_answer(answer)
+        return
+
+    company = data.statements.company
+    with st.form("ask"):
+        question = st.text_input("Your question", placeholder=f"Why did {company}'s margin change?")
+        asked = st.form_submit_button("Ask", type="primary")
+    columns = st.columns(len(suggested_questions(company)))
+    for column, suggestion in zip(columns, suggested_questions(company), strict=True):
+        if column.button(suggestion, width="stretch"):
+            question, asked = suggestion, True
+
+    answers: list[AgentAnswer] = st.session_state.setdefault("answers", {}).setdefault(
+        data.ticker, []
+    )
+    if asked and question.strip():
+        with st.status("Working on it...", expanded=True) as status:
+            try:
+                answer = ask(
+                    anthropic.Anthropic(api_key=api_key),
+                    agent_toolbox(data),
+                    data.ticker,
+                    company,
+                    question.strip(),
+                    on_step=lambda step: status.markdown(f"Called {describe_step(step)}"),
+                )
+            except anthropic.APIError as error:
+                status.update(label="Something went wrong", state="error")
+                st.error(f"Couldn't reach Claude right now ({type(error).__name__}).")
+                answer = None
+            else:
+                calls = len(answer.steps)
+                status.update(label=f"Done after {calls} tool calls", state="complete")
+        if answer:
+            answers.insert(0, answer)
+
+    for answer in answers:
+        with st.container(border=True):
+            st.markdown(f"**{md(answer.question)}**")
+            show_answer(answer)
+
+
 def render_headlines(data: CompanyData) -> None:
     latest = data.statements.periods[-1]
     st.subheader(f"Fiscal year ending {latest}")
@@ -334,7 +440,9 @@ def main() -> None:
 
     data: CompanyData = st.session_state.data
     render_header(data)
-    overview_tab, model_tab, news_tab = st.tabs(["Overview", "Financial model", "News and mood"])
+    overview_tab, model_tab, news_tab, agent_tab = st.tabs(
+        ["Overview", "Financial model", "News and mood", "Ask the analyst"]
+    )
     with overview_tab:
         render_headlines(data)
         render_overview(data)
@@ -342,6 +450,8 @@ def main() -> None:
         render_financials(data)
     with news_tab:
         render_news(data)
+    with agent_tab:
+        render_agent(data)
 
 
 main()
