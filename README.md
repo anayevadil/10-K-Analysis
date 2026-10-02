@@ -40,7 +40,7 @@ from tenk.financials.statements import build_statements
 from tenk.financials.ratios import compute_ratios
 
 statements = build_statements(edgar.company_facts(edgar.ticker_to_cik("AAPL")), years=5)
-print(statements.income)          # rows = line items, columns = fiscal year end dates
+print(statements.income)  # rows = line items, columns = fiscal year end dates
 print(compute_ratios(statements))  # margins, growth, ROE, current ratio, debt to equity
 ```
 
