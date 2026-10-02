@@ -134,3 +134,44 @@ def test_sample_company_has_a_saved_overview():
     assert overview is data.overview
     assert "fictional" in overview.business_summary
     assert len(overview.key_risks) == 5
+
+
+def test_sample_company_has_saved_news():
+    news = service.saved_news(DEMO_TICKER)
+    assert news.saved_on == "sample"
+    assert news.scored and news.tagged
+    assert news.summary
+    assert sum(news.mood_counts().values()) == len(news.articles)
+
+
+def test_load_news_and_add_moods_once(apple):
+    data, _, mock = apple
+    news_client = service.NewsClient(cache=JsonCache(":memory:"))
+    urls = news_client.feed_urls("AAPL", data.profile.name, 30)
+    mock.get(urls["Google News"], body=(FIXTURES / "news_google.xml").read_text())
+    mock.get(urls["Yahoo Finance"], body=(FIXTURES / "news_yahoo.xml").read_text())
+
+    news = service.load_news(data, news_client, scorer=None)
+    assert news.articles and not news.scored
+
+    moods = [{"id": i, "mood": "neutral"} for i in range(1, len(news.articles) + 1)]
+    claude = FakeClaude([text(json.dumps({"moods": moods, "summary": "Quiet month."}))])
+    cache = JsonCache(":memory:")
+    assert not service.find_moods(news, cache).tagged
+
+    tagged = service.add_moods(data, news, claude, cache)
+    assert tagged.summary == "Quiet month."
+    assert "Company: Apple Inc." in claude.request["messages"][0]["content"]
+    assert service.find_moods(news, cache) == tagged
+    assert service.add_moods(data, news, claude, cache) == tagged
+    assert len(claude.requests) == 1
+
+
+def test_demo_record_includes_news(apple):
+    data, _, _ = apple
+    news = service.saved_news(DEMO_TICKER)
+    record = service.demo_record(
+        data, service.Overview.from_dict(OVERVIEW), news, saved_on="2026-10-02"
+    )
+    assert record["news"]["saved_on"] == "2026-10-02"
+    assert service.NewsMood.from_dict(record["news"]).articles == news.articles

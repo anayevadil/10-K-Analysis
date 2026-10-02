@@ -1,2 +1,4 @@
-# Streamlit Community Cloud installs this file; "." installs the tenk package from pyproject.toml.
-.
+# Used by Streamlit Community Cloud: installs this package with FinBERT.
+# The CPU-only PyTorch index keeps the install small (no CUDA libraries).
+--extra-index-url https://download.pytorch.org/whl/cpu
+.[finbert]

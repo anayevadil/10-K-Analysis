@@ -4,3 +4,5 @@ Tests run against these (and the sample company in `src/tenk/demo.py`) so CI nev
 - `company_tickers.json`, `submissions_aapl.json`: trimmed EDGAR JSON responses
 - `10k_example.htm`: a tiny inline XBRL 10-K with a table of contents, a hidden
   XBRL header and headings split across tags, like real filings
+- `news_google.xml`, `news_yahoo.xml`: Google News and Yahoo Finance RSS feeds with a
+  duplicate story, an old article and an item missing its date

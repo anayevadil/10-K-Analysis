@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+<channel>
+<title>"Apple" OR AAPL stock when:30d - Google News</title>
+<link>https://news.google.com/search?q=Apple</link>
+<item>
+  <title>Apple shares hit record as iPhone sales beat estimates - Example Times</title>
+  <link>https://news.google.com/rss/articles/abc1</link>
+  <pubDate>Wed, 01 Oct 2026 14:05:00 GMT</pubDate>
+  <description>&lt;a href="https://news.google.com/rss/articles/abc1"&gt;Apple shares hit record as iPhone sales beat estimates&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color="#6f6f6f"&gt;Example Times&lt;/font&gt;</description>
+  <source url="https://www.example-times.com">Example Times</source>
+</item>
+<item>
+  <title>Apple faces EU fine over App Store rules - Policy Daily</title>
+  <link>https://news.google.com/rss/articles/abc2</link>
+  <pubDate>Mon, 29 Sep 2026 09:00:00 GMT</pubDate>
+  <description>&lt;a href="https://news.google.com/rss/articles/abc2"&gt;Apple faces EU fine over App Store rules&lt;/a&gt;</description>
+  <source url="https://policy.example.com">Policy Daily</source>
+</item>
+<item>
+  <title>Apple's 2025 product event recap - Old News</title>
+  <link>https://news.google.com/rss/articles/old</link>
+  <pubDate>Tue, 09 Sep 2025 18:00:00 GMT</pubDate>
+  <description>Old</description>
+  <source url="https://old.example.com">Old News</source>
+</item>
+<item>
+  <title>Item without a date</title>
+  <link>https://news.google.com/rss/articles/nodate</link>
+</item>
+</channel>
+</rss>
