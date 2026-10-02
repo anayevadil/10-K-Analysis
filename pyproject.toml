@@ -10,11 +10,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.1",
+    "xlsxwriter>=3.1",
     "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "openpyxl>=3.1",
     "pytest>=8",
     "responses>=0.25",
     "ruff==0.16.10",  # pinned so local and CI formatting agree
