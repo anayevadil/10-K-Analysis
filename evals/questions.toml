@@ -1,0 +1,144 @@
+# Eval set for the "Ask the analyst" agent, run against the fictional Example Corp
+# (sample data), so the expected answers are known exactly and the run needs no SEC access.
+#
+#   ANTHROPIC_API_KEY=... pytest -m eval
+#
+# Checks per question (all optional):
+#   item, year        a number from the statements or ratios that must appear in the answer
+#   tolerance         relative tolerance for that number (default 0.01 = 1%)
+#   tools             tools the agent must have called
+#   mentions_all      words that must all appear (case-insensitive)
+#   mentions_any      at least one of these must appear
+#   must_not_mention  none of these may appear
+#   cites             citation markers that must appear, e.g. "XBRL" or "10-K"
+
+[[question]]
+id = "revenue-2024"
+question = "What was Example Corp's revenue in fiscal 2024?"
+item = "revenue"
+year = 2024
+tools = ["get_financials"]
+cites = ["XBRL"]
+
+[[question]]
+id = "revenue-2020"
+question = "How much revenue did Example Corp report for 2020?"
+item = "revenue"
+year = 2020
+tools = ["get_financials"]
+
+[[question]]
+id = "revenue-growth"
+question = "How fast did revenue grow in 2024?"
+item = "revenue_growth"
+year = 2024
+tools = ["get_financials"]
+
+[[question]]
+id = "gross-margin"
+question = "What was the gross margin in 2024?"
+item = "gross_margin"
+year = 2024
+
+[[question]]
+id = "operating-margin-trend"
+question = "How did operating margin change between 2020 and 2024?"
+item = "operating_margin"
+year = 2024
+mentions_any = ["unchanged", "flat", "steady", "stable", "same", "held", "constant", "stayed"]
+
+[[question]]
+id = "net-income"
+question = "What was net income in 2024?"
+item = "net_income"
+year = 2024
+cites = ["XBRL"]
+
+[[question]]
+id = "net-income-restated"
+question = "What was net income in 2023, and was it changed after it was first reported?"
+item = "net_income"
+year = 2023
+mentions_any = ["restat", "corrected", "correction"]
+tools = ["search_10k"]
+
+[[question]]
+id = "free-cash-flow"
+question = "How much free cash flow did the company generate in 2024?"
+item = "free_cash_flow"
+year = 2024
+
+[[question]]
+id = "cash"
+question = "How much cash did Example Corp have at the end of 2024?"
+item = "cash"
+year = 2024
+
+[[question]]
+id = "capex"
+question = "How much did the company spend on capital expenditures in 2024?"
+item = "capex"
+year = 2024
+
+[[question]]
+id = "debt-to-equity"
+question = "What is the debt to equity ratio for 2024?"
+item = "debt_to_equity"
+year = 2024
+
+[[question]]
+id = "current-ratio"
+question = "Can the company cover its short-term bills? Give me the current ratio for 2024."
+item = "current_ratio"
+year = 2024
+
+[[question]]
+id = "roe"
+question = "What was return on equity in 2024?"
+item = "roe"
+year = 2024
+
+[[question]]
+id = "total-liabilities"
+question = "What were total liabilities at the end of 2024?"
+item = "total_liabilities"
+year = 2024
+
+[[question]]
+id = "revenue-tag"
+question = "Which XBRL tag does Example Corp's revenue come from in 2020 and in 2024?"
+tools = ["get_financials"]
+mentions_all = ["SalesRevenueNet", "RevenueFromContractWithCustomerExcludingAssessedTax"]
+
+[[question]]
+id = "business-model"
+question = "How does Example Corp make money?"
+tools = ["search_10k"]
+mentions_all = ["subscription"]
+mentions_any = ["hardware", "sensor"]
+cites = ["10-K"]
+
+[[question]]
+id = "growth-driver"
+question = "What drove revenue growth in 2024 according to management?"
+tools = ["search_10k"]
+mentions_all = ["subscription"]
+
+[[question]]
+id = "risks"
+question = "What are the biggest risks the company describes?"
+tools = ["search_10k"]
+mentions_any = ["chip", "supplier"]
+cites = ["10-K"]
+
+[[question]]
+id = "news-mood"
+question = "What is the mood in recent news about Example Corp?"
+tools = ["get_news_sentiment"]
+mentions_any = ["neutral", "mixed"]
+
+[[question]]
+id = "no-advice"
+question = "Should I buy Example Corp stock right now?"
+mentions_any = ["investment advice", "can't tell you", "cannot tell you", "can't make that call", "not able to", "can't recommend", "cannot recommend"]
+must_not_mention = ["you should buy", "i recommend buying", "strong buy", "good time to buy"]

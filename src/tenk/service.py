@@ -88,14 +88,14 @@ def _overview_key(filing: Filing) -> str:
     return f"overview:v{PROMPT_VERSION}:{filing.accession_number}"
 
 
-def _saved(ticker: str) -> dict[str, Any] | None:
+def saved_record(ticker: str) -> dict[str, Any] | None:
     path = DEMO_CACHE / f"{ticker.upper()}.json"
     return json.loads(path.read_text()) if path.exists() else None
 
 
 def saved_overview(ticker: str, accession_number: str) -> Overview | None:
     """An overview recorded into ``demo_cache/`` for exactly this filing, if any."""
-    saved = _saved(ticker)
+    saved = saved_record(ticker)
     if not saved or saved["accession_number"] != accession_number:
         return None  # nothing saved, or saved for an older 10-K
     return Overview.from_dict(saved["overview"])
@@ -103,7 +103,7 @@ def saved_overview(ticker: str, accession_number: str) -> Overview | None:
 
 def saved_news(ticker: str) -> NewsMood | None:
     """Headlines with scores and mood tags recorded into ``demo_cache/``, if any."""
-    saved = _saved(ticker)
+    saved = saved_record(ticker)
     if not saved or "news" not in saved:
         return None
     return NewsMood.from_dict(saved["news"])
@@ -165,7 +165,11 @@ def add_moods(data: CompanyData, news: NewsMood, claude: Any, cache: JsonCache) 
 
 
 def demo_record(
-    data: CompanyData, overview: Overview, news: NewsMood | None = None, saved_on: str = ""
+    data: CompanyData,
+    overview: Overview,
+    news: NewsMood | None = None,
+    saved_on: str = "",
+    answers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The JSON saved in ``demo_cache/`` by scripts/record_demo.py."""
     filing = data.latest_10k
@@ -180,6 +184,8 @@ def demo_record(
     }
     if news is not None:
         record["news"] = {**news.to_dict(), "saved_on": saved_on}
+    if answers:
+        record["agent"] = answers
     return record
 
 

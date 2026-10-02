@@ -1,4 +1,4 @@
-"""Save AI overviews and scored news for a few tickers into src/tenk/demo_cache/.
+"""Save AI overviews, scored news and agent answers for a few tickers into src/tenk/demo_cache/.
 
 The deployed app shows these saved results when it has no Anthropic API key,
 so the demo costs nothing after this runs once.
@@ -17,6 +17,9 @@ from datetime import date
 
 import anthropic
 
+from tenk.agent.loop import ask
+from tenk.agent.prompts import suggested_questions
+from tenk.agent.tools import Toolbox, edgar_resources
 from tenk.cache import JsonCache
 from tenk.nlp.sentiment import FinBertScorer, finbert_installed
 from tenk.service import (
@@ -45,10 +48,26 @@ def main(tickers: list[str]) -> None:
         data = load_company(ticker, edgar)
         overview = write_overview(data, edgar, claude, cache)
         news = add_moods(data, load_news(data, news_client, scorer), claude, cache)
-        record = demo_record(data, overview, news, saved_on=date.today().isoformat())
+
+        def resources(other, data=data, news=news):
+            if other.upper() == data.ticker:
+                return edgar_resources(other, edgar, lambda _: news, data=data)
+            return edgar_resources(other, edgar, lambda c: load_news(c, news_client, scorer))
+
+        toolbox = Toolbox(resources)
+        company = data.statements.company
+        questions = [suggested_questions(company)[i] for i in (0, 1, 2, 4)]
+        answers = [
+            ask(claude, toolbox, data.ticker, company, question).to_dict() for question in questions
+        ]
+        record = demo_record(
+            data, overview, news, saved_on=date.today().isoformat(), answers=answers
+        )
         path = DEMO_CACHE / f"{data.ticker}.json"
         path.write_text(json.dumps(record, indent=2) + "\n")
-        print(f"{data.ticker}: saved {path} ({len(news.articles)} headlines)")
+        print(
+            f"{data.ticker}: saved {path} ({len(news.articles)} headlines, {len(answers)} answers)"
+        )
 
 
 if __name__ == "__main__":

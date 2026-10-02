@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 
+import anthropic
 import pytest
 import responses
 import streamlit as st
+from conftest import ScriptedClaude, reply, text, tool_use
 from streamlit.testing.v1 import AppTest
 
 from tenk import service
@@ -155,3 +157,32 @@ def test_with_api_key_claude_writes_the_overview_on_request(edgar, monkeypatch):
     assert len(calls) == 1
     assert "chip suppliers" in calls[0]["risk_factors"]
     assert any("Apple designs phones" in m.value for m in at.markdown)
+
+
+def test_sample_mode_shows_saved_agent_answers():
+    at = analyze(run_app(), sample=True)
+    assert "Ask the analyst" in [s.value for s in at.subheader]
+    labels = [e.label for e in at.expander]
+    assert "How the agent got there: 2 tool calls" in labels
+    assert "How the agent got there: 3 tool calls" in labels
+    text = " ".join(m.value for m in at.markdown)
+    assert "I can't make that call for you" in text
+    assert any("search_10k" in m.value for m in at.markdown)
+
+
+def test_agent_answers_a_suggested_question_with_live_tools(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    claude = ScriptedClaude(
+        reply(tool_use("search_10k", {"ticker": "EXMPL", "query": "segments", "top_k": 2})),
+        reply(text("Mostly hardware and subscriptions [10-K Item 1].")),
+    )
+    monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: claude)
+    at = analyze(run_app(), sample=True)
+    suggestion = next(b for b in at.button if b.label == "How does Example Corp make money?")
+    at = suggestion.click().run()
+    assert not at.exception
+    assert claude.requests[0]["messages"][0]["content"] == "How does Example Corp make money?"
+    tool_result = claude.requests[1]["messages"][2]["content"][0]
+    assert "Item 1. Business" in tool_result["content"]  # the real tool ran on the sample 10-K
+    assert any("Mostly hardware and subscriptions" in m.value for m in at.markdown)
+    assert "How the agent got there: 1 tool call" in [e.label for e in at.expander]

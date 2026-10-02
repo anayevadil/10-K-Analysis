@@ -38,7 +38,8 @@ tenk = ["demo_cache/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m 'not eval'"
+markers = ["eval: agent eval set; calls the live Claude API (run with: pytest -m eval)"]
 
 [tool.ruff]
 line-length = 100

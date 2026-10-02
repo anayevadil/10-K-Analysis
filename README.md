@@ -20,7 +20,8 @@ All data comes from free sources: SEC EDGAR for filings and XBRL financials, RSS
 - [x] Streamlit app: profile, headline numbers, statements, ratios, Excel download
 - [x] Company overview written by Claude from the 10-K
 - [x] News and sentiment (FinBERT scores + Claude mood tags)
-- [ ] "Ask the analyst" agent with step trace and eval set
+- [x] "Ask the analyst" agent with step trace and eval set
+- [ ] Recorded demo for three tickers and the eval score
 
 ## Run locally
 
@@ -101,6 +102,34 @@ The News tab collects the last 30 days of headlines from Google News and Yahoo F
 - Without FinBERT the headlines are still listed, just unscored; without a key, demo tickers
   show the headlines and tags saved by `scripts/record_demo.py`.
 
+### Ask the analyst (AI agent)
+
+![Saved agent answers with the step trace open](docs/app-agent.png)
+
+The last tab is a research agent: a Claude tool-use loop that answers questions such as "Why
+did operating margin change last year?" by calling the same functions the app uses.
+
+| Tool | What it returns |
+|---|---|
+| `get_company_profile` | Industry, fiscal year end, fiscal years with data, latest 10-K link |
+| `get_financials` | Line items and ratios for up to 5 years, each with its XBRL tag |
+| `search_10k` | Best-matching passages from Business, Risk Factors and MD&A (BM25 keyword search) |
+| `get_news_sentiment` | Recent headlines with FinBERT scores, mood tags and the overall tone |
+
+- The loop (`src/tenk/agent/loop.py`) is written by hand rather than with an SDK helper, so
+  every tool call, its input, output and timing is recorded and shown under the answer.
+- The system prompt requires every number to come from a tool result and to carry a citation
+  such as `[XBRL Revenues, FY2024]` or `[10-K Item 1A]`. It declines buy, sell or hold advice
+  and explains why.
+- Each question is its own conversation, uses `claude-opus-5-5` with server-side fallback,
+  and caches the growing prompt between turns.
+
+**Eval set.** `evals/questions.toml` holds 20 questions about the sample company: exact numbers
+(checked against the XBRL statements within 1%), citations, which tools were called, 10-K
+facts, news mood and a buy/sell question the agent must decline. Run it with
+`ANTHROPIC_API_KEY=... pytest -m eval`; answers and failures are written to
+`evals/results.json`. The normal `pytest` run skips it.
+
 ### Deploy on Streamlit Community Cloud
 
 1. At [share.streamlit.io](https://share.streamlit.io), choose "Create app" and pick this
@@ -120,6 +149,8 @@ src/tenk/
   sources/news.py  Google News and Yahoo Finance RSS headlines
   nlp/summarize.py Claude overview: prompt, JSON schema, fallback handling
   nlp/sentiment.py FinBERT headline scores and Claude mood tags
+  nlp/search.py    BM25 keyword search over 10-K passages
+  agent/           analyst agent: tools, loop, prompt, eval grading
   demo_cache/      saved overviews and news shown without an API key
   financials/      XBRL tag map, three statements, ratios
   export/excel.py  three-statement Excel workbook
@@ -128,6 +159,8 @@ src/tenk/
 app/
   streamlit_app.py web interface
 scripts/
-  record_demo.py   saves AI overviews and scored news for the demo
+  record_demo.py   saves AI overviews, scored news and agent answers for the demo
+evals/
+  questions.toml   agent eval set (pytest -m eval)
 tests/             offline tests against recorded EDGAR responses
 ```
