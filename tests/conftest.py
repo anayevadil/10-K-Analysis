@@ -27,7 +27,8 @@ class FakeClaude:
     def __init__(self, content, stop_reason="end_turn", model=MODEL):
         self.requests = []
         self._response = SimpleNamespace(content=content, stop_reason=stop_reason, model=model)
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+        self.messages = SimpleNamespace(create=self._create)
+        self.beta = SimpleNamespace(messages=self.messages)
 
     @property
     def request(self):

@@ -5,6 +5,7 @@ Kept free of Streamlit so it can be tested directly and reused by the agent.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,9 +17,11 @@ from tenk.cache import JsonCache
 from tenk.demo import example_company_facts
 from tenk.financials.ratios import compute_ratios
 from tenk.financials.statements import Statements, build_statements
+from tenk.nlp.sentiment import NewsMood, score_articles, tag_moods
 from tenk.nlp.summarize import PROMPT_VERSION, Overview, summarize_filing
 from tenk.sources.edgar import ONE_YEAR, CompanyProfile, EdgarClient, Filing
 from tenk.sources.filing_text import filing_sections
+from tenk.sources.news import NewsClient
 
 DEMO_TICKER = "EXMPL"
 # Overviews saved with scripts/record_demo.py, so the demo works without an API key.
@@ -85,15 +88,25 @@ def _overview_key(filing: Filing) -> str:
     return f"overview:v{PROMPT_VERSION}:{filing.accession_number}"
 
 
+def _saved(ticker: str) -> dict[str, Any] | None:
+    path = DEMO_CACHE / f"{ticker.upper()}.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 def saved_overview(ticker: str, accession_number: str) -> Overview | None:
     """An overview recorded into ``demo_cache/`` for exactly this filing, if any."""
-    path = DEMO_CACHE / f"{ticker.upper()}.json"
-    if not path.exists():
-        return None
-    saved = json.loads(path.read_text())
-    if saved["accession_number"] != accession_number:
-        return None  # recorded for an older 10-K
+    saved = _saved(ticker)
+    if not saved or saved["accession_number"] != accession_number:
+        return None  # nothing saved, or saved for an older 10-K
     return Overview.from_dict(saved["overview"])
+
+
+def saved_news(ticker: str) -> NewsMood | None:
+    """Headlines with scores and mood tags recorded into ``demo_cache/``, if any."""
+    saved = _saved(ticker)
+    if not saved or "news" not in saved:
+        return None
+    return NewsMood.from_dict(saved["news"])
 
 
 def find_overview(data: CompanyData, cache: JsonCache) -> Overview | None:
@@ -122,18 +135,52 @@ def write_overview(
     return overview
 
 
-def demo_record(data: CompanyData, overview: Overview) -> dict[str, Any]:
+def load_news(data: CompanyData, client: NewsClient, scorer: Any | None) -> NewsMood:
+    """Last 30 days of headlines, scored by FinBERT when ``scorer`` is given."""
+    articles = client.articles(data.ticker, data.profile.name)
+    return score_articles(articles, scorer)
+
+
+def _moods_key(news: NewsMood) -> str:
+    links = "\n".join(a.article.link for a in news.articles)
+    return "moods:" + hashlib.sha256(links.encode()).hexdigest()
+
+
+def find_moods(news: NewsMood, cache: JsonCache) -> NewsMood:
+    """``news`` with Claude's mood tags if these exact headlines were tagged before."""
+    if news.tagged:
+        return news
+    cached = cache.get(_moods_key(news))
+    return NewsMood.from_dict(cached) if cached else news
+
+
+def add_moods(data: CompanyData, news: NewsMood, claude: Any, cache: JsonCache) -> NewsMood:
+    """Have Claude tag each headline's mood and summarize the news (cached for a day)."""
+    found = find_moods(news, cache)
+    if found.tagged or not news.articles:
+        return found
+    tagged = tag_moods(claude, data.profile.name, news)
+    cache.set(_moods_key(news), tagged.to_dict(), 24 * 60 * 60)
+    return tagged
+
+
+def demo_record(
+    data: CompanyData, overview: Overview, news: NewsMood | None = None, saved_on: str = ""
+) -> dict[str, Any]:
     """The JSON saved in ``demo_cache/`` by scripts/record_demo.py."""
     filing = data.latest_10k
     if filing is None:
         raise ValueError(f"{data.ticker} has no 10-K to record.")
-    return {
+    record = {
         "ticker": data.ticker,
         "company": data.profile.name,
         "accession_number": filing.accession_number,
         "report_date": filing.report_date,
         "overview": overview.to_dict(),
     }
+    if news is not None:
+        record["news"] = {**news.to_dict(), "saved_on": saved_on}
+    return record
 
 
 def _change(now: float | None, before: float | None) -> float | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import anthropic
 import pandas as pd
@@ -13,21 +14,36 @@ from tenk.cache import JsonCache
 from tenk.export.excel import workbook_bytes
 from tenk.financials.ratios import PERCENT_RATIOS, RATIO_LABELS
 from tenk.financials.xbrl_map import ALL_ITEMS, USD_PER_SHARE
+from tenk.nlp.sentiment import (
+    MOODS,
+    FinBertScorer,
+    MoodError,
+    NewsMood,
+    ScoredArticle,
+    finbert_installed,
+)
 from tenk.nlp.summarize import Overview, OverviewError
 from tenk.service import (
     CompanyData,
+    add_moods,
+    find_moods,
     find_overview,
     format_usd,
     headlines,
     load_company,
+    load_news,
     load_sample,
+    saved_news,
     write_overview,
 )
 from tenk.sources.edgar import EdgarClient, EdgarError
+from tenk.sources.news import NewsClient, NewsError
 
 LABELS = {item.key: item.label for item in ALL_ITEMS}
 UNITS = {item.key: item.unit for item in ALL_ITEMS}
 CACHE_SECONDS = 6 * 60 * 60
+NEWS_CACHE_SECONDS = 60 * 60
+TONE_ICONS = {"positive": "🟢", "neutral": "⚪", "negative": "🔴"}
 
 st.set_page_config(page_title="10-K Analyzer", page_icon="📊", layout="wide")
 
@@ -46,14 +62,30 @@ def sec_user_agent() -> str | None:
     return secret("SEC_USER_AGENT")
 
 
+def md(text: str) -> str:
+    """Escape Markdown, so "$1.3B to $1.4B" isn't rendered as a math formula."""
+    return re.sub(r"([\\`*_\[\]$<>#|~])", r"\\\1", text)
+
+
 @st.cache_resource
-def overview_cache() -> JsonCache:
+def result_cache() -> JsonCache:
+    """Claude results, kept across sessions so each costs one request."""
     return JsonCache()
+
+
+@st.cache_resource(show_spinner="Loading FinBERT...")
+def finbert() -> FinBertScorer | None:
+    return FinBertScorer() if finbert_installed() else None
 
 
 @st.cache_data(ttl=CACHE_SECONDS, show_spinner="Reading SEC filings...")
 def cached_company(ticker: str) -> CompanyData:
     return load_company(ticker, EdgarClient(user_agent=sec_user_agent()))
+
+
+@st.cache_data(ttl=NEWS_CACHE_SECONDS, show_spinner="Reading the news...")
+def cached_news(_data: CompanyData, ticker: str) -> NewsMood:
+    return load_news(_data, NewsClient(), finbert())
 
 
 def statement_table(frame: pd.DataFrame) -> pd.DataFrame:
@@ -94,16 +126,20 @@ def render_header(data: CompanyData) -> None:
 
 
 def show_overview(overview: Overview, data: CompanyData) -> None:
-    st.write(overview.business_summary)
+    st.markdown(md(overview.business_summary))
     money, risks = st.columns(2)
     with money:
         st.markdown("**How it makes money**")
-        st.markdown("\n".join(f"- **{r.name}**: {r.description}" for r in overview.revenue_sources))
+        st.markdown(
+            "\n".join(f"- **{md(r.name)}**: {md(r.description)}" for r in overview.revenue_sources)
+        )
     with risks:
         st.markdown("**Key risks**")
-        st.markdown("\n".join(f"- **{r.title}**: {r.explanation}" for r in overview.key_risks))
+        st.markdown(
+            "\n".join(f"- **{md(r.title)}**: {md(r.explanation)}" for r in overview.key_risks)
+        )
     st.markdown("**What management says about the year**")
-    st.markdown("\n".join(f"- {point}" for point in overview.management_highlights))
+    st.markdown("\n".join(f"- {md(point)}" for point in overview.management_highlights))
     if data.is_sample:
         st.caption("Sample overview written by hand for the fictional company.")
     else:
@@ -113,7 +149,7 @@ def show_overview(overview: Overview, data: CompanyData) -> None:
 
 def render_overview(data: CompanyData) -> None:
     st.subheader("Company overview")
-    overview = find_overview(data, overview_cache())
+    overview = find_overview(data, result_cache())
     if overview:
         show_overview(overview, data)
         return
@@ -136,7 +172,7 @@ def render_overview(data: CompanyData) -> None:
                 data,
                 EdgarClient(user_agent=sec_user_agent()),
                 anthropic.Anthropic(api_key=api_key),
-                overview_cache(),
+                result_cache(),
             )
     except (OverviewError, EdgarError, ValueError) as error:
         st.error(str(error))
@@ -145,6 +181,90 @@ def render_overview(data: CompanyData) -> None:
         st.error(f"Couldn't write the overview right now ({type(error).__name__}). Try again.")
         return
     show_overview(overview, data)
+
+
+def article_line(item: ScoredArticle) -> str:
+    a = item.article
+    parts = [a.published[:10], f"[{md(a.title)}]({a.link})", md(a.source)]
+    if item.sentiment:
+        s = item.sentiment
+        parts.append(f"{TONE_ICONS[s.label]} {s.label} ({s.score:+.2f})")
+    if item.mood:
+        parts.append(f"*{item.mood}*")
+    return "- " + " · ".join(parts)
+
+
+def show_news(news: NewsMood) -> None:
+    if news.saved_on == "sample":
+        st.caption("Sample headlines written by hand for the fictional company.")
+    elif news.saved_on:
+        st.caption(f"Headlines saved on {news.saved_on} for the demo.")
+    if not news.articles:
+        st.info("No headlines about this company in the last 30 days.")
+        return
+
+    tone, average, count = st.columns(3)
+    tone.metric("Overall tone", news.tone or "n/a", help="FinBERT, averaged over all headlines")
+    average.metric(
+        "Average score",
+        "n/a" if news.average_score is None else f"{news.average_score:+.2f}",
+        help="-1 is fully negative, +1 fully positive",
+    )
+    count.metric("Headlines", len(news.articles))
+
+    if news.summary:
+        st.markdown(f"**What the news is about:** {md(news.summary)}")
+    left, right = st.columns(2)
+    if news.scored:
+        with left:
+            st.markdown("**Tone (FinBERT)**")
+            st.bar_chart(
+                pd.Series(news.sentiment_counts(), name="headlines"), height=220, sort=False
+            )
+    else:
+        left.info('Install FinBERT with `pip install -e ".[finbert]"` to score each headline.')
+    if news.tagged:
+        with right:
+            st.markdown("**Mood (Claude)**")
+            counts = pd.Series(news.mood_counts(), index=list(MOODS), name="headlines")
+            st.bar_chart(counts, height=220, sort=False)
+
+    st.markdown("\n".join(article_line(item) for item in news.articles))
+    if news.tagged and news.tagged_by:
+        st.caption(f"Mood tags and summary by Claude ({news.tagged_by}). AI labels can be wrong.")
+
+
+def render_news(data: CompanyData) -> None:
+    st.subheader("News and mood")
+    st.caption("Headlines from the last 30 days via Google News and Yahoo Finance.")
+    api_key = secret("ANTHROPIC_API_KEY")
+    saved = saved_news(data.ticker)
+    if data.is_sample or (saved and not api_key):
+        show_news(saved or NewsMood([]))
+        return
+    try:
+        news = find_moods(cached_news(data, data.ticker), result_cache())
+    except (NewsError, requests.RequestException):
+        st.warning("Couldn't read the news feeds right now. Try again shortly.")
+        return
+
+    if api_key and news.articles and not news.tagged:
+        if st.button("Tag the mood with Claude"):
+            try:
+                with st.spinner("Claude is reading the headlines..."):
+                    news = add_moods(
+                        data, news, anthropic.Anthropic(api_key=api_key), result_cache()
+                    )
+            except MoodError as error:
+                st.error(str(error))
+            except anthropic.APIError as error:
+                st.error(f"Couldn't tag the headlines right now ({type(error).__name__}).")
+        else:
+            st.caption(
+                "Claude labels each headline as confidence, optimism, neutral, "
+                "uncertainty or fear, and sums up what the news is about."
+            )
+    show_news(news)
 
 
 def render_headlines(data: CompanyData) -> None:
@@ -214,9 +334,14 @@ def main() -> None:
 
     data: CompanyData = st.session_state.data
     render_header(data)
-    render_overview(data)
-    render_headlines(data)
-    render_financials(data)
+    overview_tab, model_tab, news_tab = st.tabs(["Overview", "Financial model", "News and mood"])
+    with overview_tab:
+        render_headlines(data)
+        render_overview(data)
+    with model_tab:
+        render_financials(data)
+    with news_tab:
+        render_news(data)
 
 
 main()
