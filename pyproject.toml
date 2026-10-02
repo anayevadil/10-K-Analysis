@@ -9,6 +9,7 @@ description = "10-K analyzer: company overview, three-statement model and news s
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=2.1",
     "requests>=2.31",
 ]
 
@@ -16,7 +17,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "responses>=0.25",
-    "ruff>=0.6",
+    "ruff==0.16.10",  # pinned so local and CI formatting agree
 ]
 
 [tool.setuptools.packages.find]
