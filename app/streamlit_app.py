@@ -4,14 +4,25 @@ from __future__ import annotations
 
 import os
 
+import anthropic
 import pandas as pd
 import requests
 import streamlit as st
 
+from tenk.cache import JsonCache
 from tenk.export.excel import workbook_bytes
 from tenk.financials.ratios import PERCENT_RATIOS, RATIO_LABELS
 from tenk.financials.xbrl_map import ALL_ITEMS, USD_PER_SHARE
-from tenk.service import CompanyData, format_usd, headlines, load_company, load_sample
+from tenk.nlp.summarize import Overview, OverviewError
+from tenk.service import (
+    CompanyData,
+    find_overview,
+    format_usd,
+    headlines,
+    load_company,
+    load_sample,
+    write_overview,
+)
 from tenk.sources.edgar import EdgarClient, EdgarError
 
 LABELS = {item.key: item.label for item in ALL_ITEMS}
@@ -21,13 +32,23 @@ CACHE_SECONDS = 6 * 60 * 60
 st.set_page_config(page_title="10-K Analyzer", page_icon="📊", layout="wide")
 
 
-def sec_user_agent() -> str | None:
+def secret(name: str) -> str | None:
+    """From .streamlit/secrets.toml (or Streamlit Cloud secrets), else the environment."""
     try:
-        if "SEC_USER_AGENT" in st.secrets:
-            return st.secrets["SEC_USER_AGENT"]
+        if name in st.secrets:
+            return st.secrets[name]
     except FileNotFoundError:
         pass
-    return os.environ.get("SEC_USER_AGENT")
+    return os.environ.get(name)
+
+
+def sec_user_agent() -> str | None:
+    return secret("SEC_USER_AGENT")
+
+
+@st.cache_resource
+def overview_cache() -> JsonCache:
+    return JsonCache()
 
 
 @st.cache_data(ttl=CACHE_SECONDS, show_spinner="Reading SEC filings...")
@@ -70,6 +91,60 @@ def render_header(data: CompanyData) -> None:
     if data.latest_10k:
         f = data.latest_10k
         st.markdown(f"Latest 10-K: [{f.report_date} (filed {f.filing_date})]({f.url})")
+
+
+def show_overview(overview: Overview, data: CompanyData) -> None:
+    st.write(overview.business_summary)
+    money, risks = st.columns(2)
+    with money:
+        st.markdown("**How it makes money**")
+        st.markdown("\n".join(f"- **{r.name}**: {r.description}" for r in overview.revenue_sources))
+    with risks:
+        st.markdown("**Key risks**")
+        st.markdown("\n".join(f"- **{r.title}**: {r.explanation}" for r in overview.key_risks))
+    st.markdown("**What management says about the year**")
+    st.markdown("\n".join(f"- {point}" for point in overview.management_highlights))
+    if data.is_sample:
+        st.caption("Sample overview written by hand for the fictional company.")
+    else:
+        source = f"Written by Claude from the {data.latest_10k.report_date} 10-K"
+        st.caption(f"{source}. AI summaries can contain mistakes, so check the filing.")
+
+
+def render_overview(data: CompanyData) -> None:
+    st.subheader("Company overview")
+    overview = find_overview(data, overview_cache())
+    if overview:
+        show_overview(overview, data)
+        return
+    if data.latest_10k is None:
+        st.info("There's no 10-K on EDGAR to summarize for this company.")
+        return
+    api_key = secret("ANTHROPIC_API_KEY")
+    if not api_key:
+        st.info(
+            "The AI overview needs an Anthropic API key. Set ANTHROPIC_API_KEY to have Claude "
+            "read this company's 10-K, or try a ticker with a saved overview."
+        )
+        return
+    if not st.button("Write the overview from the 10-K"):
+        st.caption("Claude reads the Business, Risk Factors and MD&A sections of the latest 10-K.")
+        return
+    try:
+        with st.spinner("Claude is reading the 10-K..."):
+            overview = write_overview(
+                data,
+                EdgarClient(user_agent=sec_user_agent()),
+                anthropic.Anthropic(api_key=api_key),
+                overview_cache(),
+            )
+    except (OverviewError, EdgarError, ValueError) as error:
+        st.error(str(error))
+        return
+    except (anthropic.APIError, requests.RequestException) as error:
+        st.error(f"Couldn't write the overview right now ({type(error).__name__}). Try again.")
+        return
+    show_overview(overview, data)
 
 
 def render_headlines(data: CompanyData) -> None:
@@ -139,6 +214,7 @@ def main() -> None:
 
     data: CompanyData = st.session_state.data
     render_header(data)
+    render_overview(data)
     render_headlines(data)
     render_financials(data)
 

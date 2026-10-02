@@ -7,6 +7,7 @@ and keeps us well under SEC's rate limit.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -18,7 +19,9 @@ DEFAULT_CACHE_PATH = Path(".cache/tenk.sqlite3")
 class JsonCache:
     """Stores JSON-serialisable values with a per-entry time-to-live."""
 
-    def __init__(self, path: str | Path = DEFAULT_CACHE_PATH) -> None:
+    def __init__(self, path: str | Path | None = None) -> None:
+        # TENK_CACHE_PATH can point somewhere else, or be ":memory:" for tests.
+        path = path or os.environ.get("TENK_CACHE_PATH") or DEFAULT_CACHE_PATH
         self.path = Path(path)
         if str(path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)

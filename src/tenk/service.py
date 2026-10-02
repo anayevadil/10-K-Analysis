@@ -5,16 +5,24 @@ Kept free of Streamlit so it can be tested directly and reused by the agent.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
+from tenk.cache import JsonCache
 from tenk.demo import example_company_facts
 from tenk.financials.ratios import compute_ratios
 from tenk.financials.statements import Statements, build_statements
-from tenk.sources.edgar import CompanyProfile, EdgarClient, Filing
+from tenk.nlp.summarize import PROMPT_VERSION, Overview, summarize_filing
+from tenk.sources.edgar import ONE_YEAR, CompanyProfile, EdgarClient, Filing
+from tenk.sources.filing_text import filing_sections
 
 DEMO_TICKER = "EXMPL"
+# Overviews saved with scripts/record_demo.py, so the demo works without an API key.
+DEMO_CACHE = Path(__file__).parent / "demo_cache"
 
 
 @dataclass
@@ -25,6 +33,7 @@ class CompanyData:
     ratios: pd.DataFrame
     latest_10k: Filing | None
     is_sample: bool = False
+    overview: Overview | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +77,63 @@ def load_sample(years: int = 5) -> CompanyData:
         ratios=compute_ratios(statements),
         latest_10k=None,
         is_sample=True,
+        overview=saved_overview(DEMO_TICKER, "sample"),
     )
+
+
+def _overview_key(filing: Filing) -> str:
+    return f"overview:v{PROMPT_VERSION}:{filing.accession_number}"
+
+
+def saved_overview(ticker: str, accession_number: str) -> Overview | None:
+    """An overview recorded into ``demo_cache/`` for exactly this filing, if any."""
+    path = DEMO_CACHE / f"{ticker.upper()}.json"
+    if not path.exists():
+        return None
+    saved = json.loads(path.read_text())
+    if saved["accession_number"] != accession_number:
+        return None  # recorded for an older 10-K
+    return Overview.from_dict(saved["overview"])
+
+
+def find_overview(data: CompanyData, cache: JsonCache) -> Overview | None:
+    """An overview that is already written, without calling Claude."""
+    if data.overview or not data.latest_10k:
+        return data.overview
+    cached = cache.get(_overview_key(data.latest_10k))
+    if cached is not None:
+        return Overview.from_dict(cached)
+    return saved_overview(data.ticker, data.latest_10k.accession_number)
+
+
+def write_overview(
+    data: CompanyData, edgar: EdgarClient, claude: Any, cache: JsonCache
+) -> Overview:
+    """Read the latest 10-K and have Claude write the overview (cached per filing)."""
+    found = find_overview(data, cache)
+    if found:
+        return found
+    filing = data.latest_10k
+    if filing is None:
+        raise ValueError(f"{data.ticker} has no 10-K to summarize.")
+    sections = filing_sections(edgar.filing_document(filing))
+    overview = summarize_filing(claude, data.profile.name, filing.report_date, sections)
+    cache.set(_overview_key(filing), overview.to_dict(), ONE_YEAR)
+    return overview
+
+
+def demo_record(data: CompanyData, overview: Overview) -> dict[str, Any]:
+    """The JSON saved in ``demo_cache/`` by scripts/record_demo.py."""
+    filing = data.latest_10k
+    if filing is None:
+        raise ValueError(f"{data.ticker} has no 10-K to record.")
+    return {
+        "ticker": data.ticker,
+        "company": data.profile.name,
+        "accession_number": filing.accession_number,
+        "report_date": filing.report_date,
+        "overview": overview.to_dict(),
+    }
 
 
 def _change(now: float | None, before: float | None) -> float | None:
