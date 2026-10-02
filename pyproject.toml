@@ -9,6 +9,7 @@ description = "10-K analyzer: company overview, three-statement model and news s
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=2.1",
     "requests>=2.31",
 ]
 
