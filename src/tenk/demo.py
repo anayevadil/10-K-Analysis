@@ -1,6 +1,8 @@
-"""A small, fictional company in the exact shape of EDGAR's companyfacts JSON.
+"""Sample data: a small, fictional company in the exact shape of EDGAR's companyfacts JSON.
 
-Numbers are round on purpose so expected ratios can be checked by hand.
+Used by the tests and by the app's offline sample mode, so the app can be
+tried without network access to sec.gov. Numbers are round on purpose so
+expected ratios can be checked by hand.
 Edge cases built in:
 - revenue switches tag in 2021 (SalesRevenueNet -> RevenueFromContract...)
 - GrossProfit is only tagged from 2022; earlier years must be derived
@@ -52,7 +54,7 @@ def _series(kind, values_by_year, unit="USD"):
     return _tag([make(y, v) for y, v in values_by_year.items()], unit)
 
 
-def build_example_facts() -> dict:
+def example_company_facts() -> dict:
     revenue = {y: (800 + 100 * i) * M for i, y in enumerate(YEARS)}  # 800 .. 1300
     cogs = {y: 0.6 * r for y, r in revenue.items()}
     operating = {y: 0.15 * r for y, r in revenue.items()}

@@ -1,12 +1,12 @@
 import pytest
-from example_facts import build_example_facts
 
+from tenk.demo import example_company_facts
 from tenk.financials.statements import build_statements
 
 
 @pytest.fixture
 def example_facts():
-    return build_example_facts()
+    return example_company_facts()
 
 
 @pytest.fixture

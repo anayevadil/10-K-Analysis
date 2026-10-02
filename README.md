@@ -10,12 +10,14 @@ All data comes from free sources: SEC EDGAR for filings and XBRL financials, RSS
 
 > Work in progress. Not investment advice.
 
+![The app in sample-data mode](docs/app-sample-mode.png)
+
 ## Status
 
 - [x] Project setup, CI, SEC EDGAR client with caching
 - [x] Three-statement model and key ratios from XBRL company facts
 - [x] Excel export with live ratio formulas and highlighting
-- [ ] Streamlit app
+- [x] Streamlit app: profile, headline numbers, statements, ratios, Excel download
 - [ ] Company overview with LLM summary
 - [ ] News and sentiment (FinBERT + LLM mood tags)
 - [ ] "Ask the analyst" agent with step trace and eval set
@@ -59,6 +61,23 @@ first tag with a value wins, and `statements.sources` records which tag was used
 Missing subtotals such as gross profit are derived, restated values replace the originals,
 and only full-year values from 10-K filings are used.
 
+## Run the app
+
+```bash
+export SEC_USER_AGENT="10-K Analyzer you@example.com"
+streamlit run app/streamlit_app.py
+```
+
+Turn on "Use sample data" in the sidebar to try the app without network access; it loads
+a fictional company (`src/tenk/demo.py`) through the same code path as real filings.
+
+### Deploy on Streamlit Community Cloud
+
+1. At [share.streamlit.io](https://share.streamlit.io), choose "Create app" and pick this
+   repository, branch `main`, main file `app/streamlit_app.py`.
+2. Under Advanced settings, add the secret `SEC_USER_AGENT = "10-K Analyzer you@example.com"`.
+3. Deploy. `requirements.txt` installs this package and its dependencies.
+
 ## Project layout
 
 ```
@@ -67,5 +86,9 @@ src/tenk/
   sources/edgar.py SEC EDGAR client (ticker lookup, filings, XBRL company facts)
   financials/      XBRL tag map, three statements, ratios
   export/excel.py  three-statement Excel workbook
+  service.py       loads everything the app shows for one company
+  demo.py          fictional sample company (offline mode and tests)
+app/
+  streamlit_app.py web interface
 tests/             offline tests against recorded EDGAR responses
 ```
