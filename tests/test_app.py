@@ -106,7 +106,8 @@ def test_sample_mode_shows_saved_news():
     assert "*fear*" in text
 
 
-def test_live_news_without_finbert_or_key_lists_headlines(edgar):
+def test_live_news_without_finbert_or_key_lists_headlines(edgar, monkeypatch):
+    monkeypatch.setattr("tenk.nlp.sentiment.finbert_installed", lambda: False)
     at = analyze(run_app())
     assert not at.exception
     text = " ".join(m.value for m in at.markdown)
@@ -136,7 +137,7 @@ def test_with_api_key_claude_writes_the_overview_on_request(edgar, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     calls = []
 
-    def fake_summarize(client, company, fiscal_year, sections):
+    def fake_summarize(client, company, fiscal_year, sections, financials=""):
         calls.append(sections)
         return Overview.from_dict(
             {
@@ -186,3 +187,21 @@ def test_agent_answers_a_suggested_question_with_live_tools(monkeypatch):
     assert "Item 1. Business" in tool_result["content"]  # the real tool ran on the sample 10-K
     assert any("Mostly hardware and subscriptions" in m.value for m in at.markdown)
     assert "How the agent got there: 1 tool call" in [e.label for e in at.expander]
+
+
+def test_sample_overview_leads_with_key_takeaways():
+    at = analyze(run_app(), sample=True)
+    assert not at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "Key takeaways from this report" in text
+    assert "Working capital" in text
+
+
+def test_choosing_an_earlier_10k_shows_that_year(edgar):
+    at = analyze(run_app())
+    picker = next(s for s in at.sidebar.selectbox if s.label == "10-K report")
+    assert len(picker.options) >= 2
+    at = picker.select_index(1).run()
+    assert not at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert picker.value in text  # the header links to the chosen 10-K

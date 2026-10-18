@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from tenk.cache import JsonCache
 from tenk.demo import example_company_facts
 from tenk.financials.ratios import compute_ratios
 from tenk.financials.statements import Statements, build_statements
+from tenk.financials.xbrl_map import ALL_ITEMS, SHARES, USD
 from tenk.nlp.sentiment import NewsMood, score_articles, tag_moods
 from tenk.nlp.summarize import PROMPT_VERSION, Overview, summarize_filing
 from tenk.sources.edgar import ONE_YEAR, CompanyProfile, EdgarClient, Filing
@@ -37,6 +38,8 @@ class CompanyData:
     latest_10k: Filing | None
     is_sample: bool = False
     overview: Overview | None = None
+    filings: list[Filing] = field(default_factory=list)  # 10-Ks to choose from, newest first
+    history: Statements | None = None  # every year loaded, ``statements`` is a slice of it
 
 
 @dataclass(frozen=True)
@@ -47,17 +50,41 @@ class Headline:
     is_percent: bool = False
 
 
-def load_company(ticker: str, client: EdgarClient, years: int = 5) -> CompanyData:
+def load_company(
+    ticker: str, client: EdgarClient, years: int = 5, max_filings: int = 10
+) -> CompanyData:
+    """Statements and the available 10-Ks, set to the latest filing (see ``for_filing``)."""
     ticker = ticker.strip().upper()
     profile = client.profile(ticker)
-    statements = build_statements(client.company_facts(profile.cik), years=years)
-    filings = client.filings(ticker, form="10-K", limit=1)
-    return CompanyData(
+    history = build_statements(client.company_facts(profile.cik), years=years + max_filings)
+    filings = client.filings(ticker, form="10-K", limit=max_filings)
+    data = CompanyData(
         ticker=ticker,
         profile=profile,
+        statements=history,
+        ratios=compute_ratios(history),
+        latest_10k=None,
+        filings=filings,
+        history=history,
+    )
+    latest = _last_years(data, years)  # the newest 10-K needs no cutoff date
+    return replace(latest, latest_10k=filings[0] if filings else None)
+
+
+def _last_years(data: CompanyData, years: int) -> CompanyData:
+    statements = (data.history or data.statements).up_to("9999-12-31", years)
+    return replace(data, statements=statements, ratios=compute_ratios(statements))
+
+
+def for_filing(data: CompanyData, filing: Filing, years: int = 5) -> CompanyData:
+    """``data`` as of one 10-K: the last ``years`` fiscal years up to its report date."""
+    statements = (data.history or data.statements).up_to(filing.report_date, years)
+    return replace(
+        data,
         statements=statements,
         ratios=compute_ratios(statements),
-        latest_10k=filings[0] if filings else None,
+        latest_10k=filing,
+        overview=None,
     )
 
 
@@ -130,9 +157,61 @@ def write_overview(
     if filing is None:
         raise ValueError(f"{data.ticker} has no 10-K to summarize.")
     sections = filing_sections(edgar.filing_document(filing))
-    overview = summarize_filing(claude, data.profile.name, filing.report_date, sections)
+    overview = summarize_filing(
+        claude, data.profile.name, filing.report_date, sections, financials=financial_digest(data)
+    )
     cache.set(_overview_key(filing), overview.to_dict(), ONE_YEAR)
     return overview
+
+
+DIGEST_ITEMS = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "cfo",
+    "free_cash_flow",
+    "cash",
+    "short_term_investments",
+    "current_assets",
+    "current_liabilities",
+    "total_assets",
+    "long_term_debt",
+    "shareholders_equity",
+    "dividends",
+    "buybacks",
+    "diluted_shares",
+)
+
+
+def financial_digest(data: CompanyData) -> str:
+    """Latest vs prior year, as text for Claude, so it can call out big swings."""
+    s = data.statements
+    if len(s.periods) < 2:
+        return ""
+    now, before = s.periods[-1], s.periods[-2]
+    lines = [f"Fiscal years ending {now} (latest) and {before}, in US dollars unless noted:"]
+
+    def line(label: str, a: float | None, b: float | None, fmt: Any = format_usd) -> None:
+        if a is None and b is None:
+            return
+        change = _change(a, b)
+        shown = f" ({change:+.1%})" if change is not None else ""
+        lines.append(f"- {label}: {fmt(a)} vs {fmt(b)}{shown}")
+
+    items = {i.key: i for i in ALL_ITEMS if i.unit in (USD, SHARES)}
+    for key in DIGEST_ITEMS:
+        if key in items:
+            fmt = format_shares if items[key].unit == SHARES else format_usd
+            line(items[key].label, s.value(key, now), s.value(key, before), fmt)
+    assets, liabilities = (s.value("current_assets", now), s.value("current_liabilities", now))
+    prior_assets, prior_liabilities = (
+        s.value("current_assets", before),
+        s.value("current_liabilities", before),
+    )
+    if None not in (assets, liabilities, prior_assets, prior_liabilities):
+        line("Working capital", assets - liabilities, prior_assets - prior_liabilities)
+    return "\n".join(lines)
 
 
 def load_news(data: CompanyData, client: NewsClient, scorer: Any | None) -> NewsMood:
@@ -235,3 +314,13 @@ def format_usd(value: float | None) -> str:
         if value >= size:
             return f"{sign}${value / size:,.2f}{suffix}"
     return f"{sign}${value:,.0f}"
+
+
+def format_shares(value: float | None) -> str:
+    """Compact share counts: 15.20M shares, 1.02B shares."""
+    if value is None or pd.isna(value):
+        return "n/a"
+    for size, suffix in ((1e9, "B"), (1e6, "M")):
+        if abs(value) >= size:
+            return f"{value / size:,.2f}{suffix} shares"
+    return f"{value:,.0f} shares"

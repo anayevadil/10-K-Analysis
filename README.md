@@ -72,11 +72,18 @@ streamlit run app/streamlit_app.py
 Turn on "Use sample data" in the sidebar to try the app without network access; it loads
 a fictional company (`src/tenk/demo.py`) through the same code path as real filings.
 
+### Earlier reports
+
+Under the ticker box, the "10-K report" list shows the last ten annual reports on EDGAR.
+Pick one and the statements, ratios, Excel model, overview and agent all move to that
+fiscal year (five years of history up to it).
+
 ### AI company overview
 
 With `ANTHROPIC_API_KEY` set, a "Write the overview from the 10-K" button appears. The app
 downloads the latest 10-K, pulls out Item 1 (Business), Item 1A (Risk Factors) and Item 7
-(MD&A), and asks Claude for a plain-English overview: what the company does, how it makes
+(MD&A), and asks Claude for a plain-English overview that opens with the key takeaways of the report
+(acquisitions, buybacks, debt, swings in working capital, using the statement figures too): what the company does, how it makes
 money, the five risks that matter most, and management's view of the year.
 
 - Structured outputs make Claude's reply match a JSON schema, so nothing is parsed from free text.

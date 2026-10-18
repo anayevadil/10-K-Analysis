@@ -17,7 +17,7 @@ from tenk.agent.tools import Toolbox, edgar_resources, sample_resources
 from tenk.cache import JsonCache
 from tenk.export.excel import workbook_bytes
 from tenk.financials.ratios import PERCENT_RATIOS, RATIO_LABELS
-from tenk.financials.xbrl_map import ALL_ITEMS, USD_PER_SHARE
+from tenk.financials.xbrl_map import ALL_ITEMS, KEY_ROWS, USD_PER_SHARE
 from tenk.nlp.sentiment import (
     MOODS,
     FinBertScorer,
@@ -33,6 +33,7 @@ from tenk.service import (
     add_moods,
     find_moods,
     find_overview,
+    for_filing,
     format_usd,
     headlines,
     load_company,
@@ -41,13 +42,15 @@ from tenk.service import (
     saved_news,
     write_overview,
 )
-from tenk.sources.edgar import EdgarClient, EdgarError
+from tenk.sources.edgar import EdgarClient, EdgarError, Filing
 from tenk.sources.news import NewsClient, NewsError
 
 LABELS = {item.key: item.label for item in ALL_ITEMS}
 UNITS = {item.key: item.unit for item in ALL_ITEMS}
 CACHE_SECONDS = 6 * 60 * 60
 NEWS_CACHE_SECONDS = 60 * 60
+KEY_LABELS = {LABELS[k] for k in KEY_ROWS if k in LABELS}
+KEY_ROW_STYLE = "background-color: #E8F1FB; font-weight: 700; color: #0F2A4A"
 TONE_ICONS = {"positive": "🟢", "neutral": "⚪", "negative": "🔴"}
 
 st.set_page_config(page_title="10-K Analyzer", page_icon="📊", layout="wide")
@@ -104,6 +107,15 @@ def statement_table(frame: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
+def highlight_rows(table: pd.DataFrame, labels: set[str]) -> pd.io.formats.style.Styler:
+    """Bold, shaded rows for the main lines (gross profit, net income, total assets, ...)."""
+
+    def style(row: pd.Series) -> list[str]:
+        return [KEY_ROW_STYLE if row.name in labels else ""] * len(row)
+
+    return table.style.apply(style, axis=1)
+
+
 def ratio_table(ratios: pd.DataFrame) -> pd.DataFrame:
     table = pd.DataFrame(index=[RATIO_LABELS[k] for k in ratios.index])
     for period in ratios.columns:
@@ -127,10 +139,14 @@ def render_header(data: CompanyData) -> None:
     st.caption(" · ".join(facts))
     if data.latest_10k:
         f = data.latest_10k
-        st.markdown(f"Latest 10-K: [{f.report_date} (filed {f.filing_date})]({f.url})")
+        st.markdown(f"10-K shown: [{filing_label(f)}]({f.url})")
 
 
 def show_overview(overview: Overview, data: CompanyData) -> None:
+    if overview.key_takeaways:
+        with st.container(border=True):
+            st.markdown("**Key takeaways from this report**")
+            st.markdown("\n".join(f"- {md(point)}" for point in overview.key_takeaways))
     st.markdown(md(overview.business_summary))
     money, risks = st.columns(2)
     with money:
@@ -392,9 +408,13 @@ def render_financials(data: CompanyData) -> None:
     for tab, frame in zip(tabs[:3], (s.income, s.balance, s.cash_flow), strict=True):
         with tab:
             st.caption("USD millions, except EPS in USD and shares in millions")
-            st.dataframe(statement_table(frame).style.format("{:,.2f}", na_rep=""), width="stretch")
+            styled = highlight_rows(statement_table(frame), KEY_LABELS)
+            st.dataframe(styled.format("{:,.2f}", na_rep=""), width="stretch", height="content")
     with tabs[3]:
-        st.dataframe(ratio_table(data.ratios), width="stretch")
+        margins = {RATIO_LABELS[k] for k in RATIO_LABELS if k.endswith("_margin")}
+        st.dataframe(
+            highlight_rows(ratio_table(data.ratios), margins), width="stretch", height="content"
+        )
 
     st.download_button(
         "Download the Excel model",
@@ -405,20 +425,39 @@ def render_financials(data: CompanyData) -> None:
     )
 
 
+def filing_label(f: Filing) -> str:
+    return f"Fiscal year ending {f.report_date} (filed {f.filing_date})"
+
+
+def choose_filing(base: CompanyData) -> CompanyData:
+    """Pick which 10-K to analyze; the sidebar list sits right under the ticker box."""
+    if len(base.filings) < 2:
+        return base
+    with st.sidebar:
+        chosen = st.selectbox(
+            "10-K report",
+            base.filings,
+            format_func=filing_label,
+            key=f"filing_{base.ticker}",
+            help="Analyze an earlier annual report: statements, overview and the agent follow it.",
+        )
+    return for_filing(base, chosen)
+
+
 def main() -> None:
     st.title("10-K Analyzer")
     st.caption(
         "Company financials straight from SEC filings, in plain language. Not investment advice."
     )
 
-    with st.sidebar:
-        with st.form("search"):
-            ticker = st.text_input("Ticker", value="AAPL", max_chars=10)
-            use_sample = st.toggle("Use sample data (works offline)", value=False)
-            submitted = st.form_submit_button("Analyze", type="primary")
-        st.caption("Data: SEC EDGAR XBRL company facts, annual 10-K values.")
+    with st.sidebar, st.form("search"):
+        ticker = st.text_input("Ticker", value="AAPL", max_chars=10)
+        use_sample = st.toggle("Use sample data (works offline)", value=False)
+        submitted = st.form_submit_button("Analyze", type="primary")
 
     if not submitted and "data" not in st.session_state:
+        with st.sidebar:
+            st.caption("Data: SEC EDGAR XBRL company facts, annual 10-K values.")
         st.info("Enter a US ticker and press Analyze.")
         return
 
@@ -438,7 +477,9 @@ def main() -> None:
             st.error(f"{ticker.upper()} has no annual 10-K financial data to show ({error}).")
             return
 
-    data: CompanyData = st.session_state.data
+    data = choose_filing(st.session_state.data)
+    with st.sidebar:
+        st.caption("Data: SEC EDGAR XBRL company facts, annual 10-K values.")
     render_header(data)
     overview_tab, model_tab, news_tab, agent_tab = st.tabs(
         ["Overview", "Financial model", "News and mood", "Ask the analyst"]

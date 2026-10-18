@@ -7,7 +7,8 @@ Sheets:
   workbook stays a working model when someone edits a number
 - Sources: the XBRL tag behind every number (or "derived")
 
-Highlighting: subtotals and margins are bold, ratios turn green when they
+Highlighting: key rows (gross profit, operating income, net income, total assets
+and the like) and margins are bold on a blue band, ratios turn green when they
 improve on the prior year and red when they get worse, and a check row flags
 a balance sheet that does not balance.
 """
@@ -29,7 +30,7 @@ from xlsxwriter.worksheet import Worksheet
 
 from tenk.financials.ratios import PERCENT_RATIOS, RATIO_LABELS, compute_ratios
 from tenk.financials.statements import Statements
-from tenk.financials.xbrl_map import ALL_ITEMS, SHARES, USD
+from tenk.financials.xbrl_map import ALL_ITEMS, KEY_ROWS, SHARES, USD
 
 ITEMS = {item.key: item for item in ALL_ITEMS}
 MILLION = 1_000_000
@@ -40,22 +41,8 @@ SHEET_NAMES = {
     "cash_flow": "Cash Flow",
 }
 
-# Rows shown in bold as subtotals.
-SUBTOTALS = {
-    "revenue",
-    "gross_profit",
-    "operating_income",
-    "net_income",
-    "current_assets",
-    "total_assets",
-    "current_liabilities",
-    "total_liabilities",
-    "total_equity",
-    "cfo",
-    "cfi",
-    "cff",
-    "free_cash_flow",
-}
+
+KEY_FILL = "#E8F1FB"
 
 # Ratios where a lower value is the better one.
 LOWER_IS_BETTER = {"debt_to_equity"}
@@ -84,12 +71,17 @@ class _Formats:
             {"bold": True, "bottom": 1, "align": "center", "bg_color": "#DDEBF7"}
         )
         self.label = wb.add_format({})
-        self.label_bold = wb.add_format({"bold": True})
+        self.plain_bold = wb.add_format({"bold": True})
+        self.label_bold = wb.add_format({"bold": True, "bg_color": KEY_FILL})
         self.money = wb.add_format({"num_format": "#,##0;(#,##0)"})
-        self.money_bold = wb.add_format({"num_format": "#,##0;(#,##0)", "bold": True, "top": 1})
+        self.money_bold = wb.add_format(
+            {"num_format": "#,##0;(#,##0)", "bold": True, "top": 1, "bg_color": KEY_FILL}
+        )
         self.eps = wb.add_format({"num_format": "0.00;(0.00)"})
         self.percent = wb.add_format({"num_format": "0.0%"})
-        self.percent_bold = wb.add_format({"num_format": "0.0%", "bold": True})
+        self.percent_bold = wb.add_format(
+            {"num_format": "0.0%", "bold": True, "bg_color": KEY_FILL}
+        )
         self.multiple = wb.add_format({"num_format": "0.00x"})
         self.check = wb.add_format({"num_format": "#,##0;(#,##0)", "italic": True})
         self.note = wb.add_format({"italic": True, "font_color": "#595959"})
@@ -119,7 +111,7 @@ def _write_statement(
     _header(ws, fmt, "USD millions (EPS in USD, shares in millions)", periods)
     for row, key in enumerate(frame.index, start=HEADER_ROW + 1):
         item = ITEMS[key]
-        bold = key in SUBTOTALS
+        bold = key in KEY_ROWS
         ws.write(row, 0, item.label, fmt.label_bold if bold else fmt.label)
         if item.unit == USD:
             scale, cell_fmt = MILLION, fmt.money_bold if bold else fmt.money
@@ -289,7 +281,7 @@ def _write_summary(wb: Workbook, fmt: _Formats, s: Statements, periods: list[str
         ("Note", "Generated automatically from XBRL data. Not investment advice."),
     ]
     for i, (label, value) in enumerate(rows, start=2):
-        ws.write(i, 0, label, fmt.label_bold)
+        ws.write(i, 0, label, fmt.plain_bold)
         ws.write(i, 1, value)
 
 
