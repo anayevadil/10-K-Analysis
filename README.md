@@ -17,7 +17,7 @@ All data comes from free sources: SEC EDGAR for filings and XBRL financials, RSS
 | | |
 |---|---|
 | **What it does** | Turns a ticker into an analyst-style first look at a company: what it does, how it makes money, its main risks, five years of financials and the mood of recent news, plus an AI agent you can question about the filing. |
-| **Data** | SEC EDGAR: company submissions, XBRL company facts (financial statements) and the latest 10-K HTML (Item 1 Business, 1A Risk Factors, 7 MD&A). Google News and Yahoo Finance RSS for headlines. All free, no paid data feeds. |
+| **Data** | SEC EDGAR: company submissions, XBRL company facts (financial statements) and the HTML of the latest 10-K or an earlier one you pick (Item 1 Business, 1A Risk Factors, 7 MD&A). Google News and Yahoo Finance RSS for headlines. All free, no paid data feeds. |
 | **Stack** | Python 3.11, pandas, requests, BeautifulSoup, SQLite cache, XlsxWriter, Streamlit, Claude API (`anthropic` SDK: structured outputs, tool use), FinBERT via Hugging Face `transformers` + PyTorch, BM25 search. Tested with pytest on recorded EDGAR responses; ruff and GitHub Actions CI. |
 | **Output** | A Streamlit web app with four tabs (Overview, Financial model, News and mood, Ask the analyst) and a downloadable Excel workbook: Summary, income statement, balance sheet, cash flow, a Ratios sheet with live formulas colored green or red against the prior year, and a Sources sheet with the XBRL tag behind every number. |
 
@@ -92,7 +92,7 @@ fiscal year (five years of history up to it).
 ### AI company overview
 
 With `ANTHROPIC_API_KEY` set, a "Write the overview from the 10-K" button appears. The app
-downloads the latest 10-K, pulls out Item 1 (Business), Item 1A (Risk Factors) and Item 7
+downloads the chosen 10-K (the latest by default), pulls out Item 1 (Business), Item 1A (Risk Factors) and Item 7
 (MD&A), and asks Claude for a plain-English overview that opens with the key takeaways of the report
 (acquisitions, buybacks, debt, swings in working capital, using the statement figures too): what the company does, how it makes
 money, the five risks that matter most, and management's view of the year.
