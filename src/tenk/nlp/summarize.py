@@ -20,7 +20,7 @@ MAX_TOKENS = 16000
 # Anthropic's recommended fallback model instead of returning the refusal.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Bump when the prompt or schema changes, so cached overviews are rewritten.
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 # About 25k tokens per section keeps even a large bank's MD&A affordable.
 MAX_SECTION_CHARS = 100_000
 
@@ -29,7 +29,8 @@ You explain US public companies to people who are new to investing. You are \
 given sections of a company's latest annual report (Form 10-K). Write an \
 overview that someone without a finance background can read in two minutes.
 
-- Use only what the filing says. Do not add outside facts, prices or forecasts.
+- Use only what the filing and the "Reported figures" say. Do not add outside facts, \
+prices or forecasts.
 - Prefer plain words over jargon; when a finance term is needed, explain it \
 in a few words.
 - Mention concrete numbers from the filing where they help (revenue growth, \
@@ -37,6 +38,12 @@ segment size), with the period they refer to.
 - Stay neutral. Do not say whether to buy, sell or hold the stock.
 
 Fields:
+- key_takeaways: three to six of the most notable developments in this report, \
+the things a reader would want to know first: acquisitions or divestitures, \
+new shares issued or buybacks, new or repaid debt, dividends, restructuring, \
+and striking changes in revenue, margins, cash or working capital (current \
+assets minus current liabilities). Each is one sentence with the number and the \
+period. Put the most important first.
 - business_summary: two or three sentences on what the company does.
 - revenue_sources: the main segments, products or services that bring in \
 money, most important first (two to six entries).
@@ -52,6 +59,7 @@ OVERVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "business_summary": _STRING,
+        "key_takeaways": {"type": "array", "items": _STRING},
         "revenue_sources": {
             "type": "array",
             "items": {
@@ -75,6 +83,7 @@ OVERVIEW_SCHEMA: dict[str, Any] = {
     },
     "required": [
         "business_summary",
+        "key_takeaways",
         "revenue_sources",
         "key_risks",
         "management_highlights",
@@ -106,6 +115,7 @@ class Overview:
     revenue_sources: list[RevenueSource]
     key_risks: list[Risk]
     management_highlights: list[str]
+    key_takeaways: list[str] = field(default_factory=list)
     missing_sections: list[str] = field(default_factory=list)
     model: str = ""  # the model that wrote it (can be a fallback model)
 
@@ -119,13 +129,18 @@ class Overview:
             revenue_sources=[RevenueSource(**r) for r in data["revenue_sources"]],
             key_risks=[Risk(**r) for r in data["key_risks"]],
             management_highlights=list(data["management_highlights"]),
+            key_takeaways=list(data.get("key_takeaways", [])),
             missing_sections=list(data.get("missing_sections", [])),
             model=data.get("model", ""),
         )
 
 
-def build_prompt(company: str, fiscal_year: str, sections: dict[str, str]) -> str:
+def build_prompt(
+    company: str, fiscal_year: str, sections: dict[str, str], financials: str = ""
+) -> str:
     parts = [f"Company: {company}\nFiscal year ended: {fiscal_year}\n"]
+    if financials:
+        parts.append(f"<reported_figures>\n{financials}\n</reported_figures>")
     for key, label in SECTION_LABELS.items():
         text = sections.get(key)
         if not text:
@@ -144,6 +159,7 @@ def summarize_filing(
     fiscal_year: str,
     sections: dict[str, str],
     model: str = MODEL,
+    financials: str = "",
 ) -> Overview:
     """Ask Claude for the overview. ``client`` is an ``anthropic.Anthropic``."""
     if not sections:
@@ -158,7 +174,9 @@ def summarize_filing(
             "format": {"type": "json_schema", "schema": OVERVIEW_SCHEMA},
         },
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_prompt(company, fiscal_year, sections)}],
+        messages=[
+            {"role": "user", "content": build_prompt(company, fiscal_year, sections, financials)}
+        ],
     )
     if response.stop_reason == "refusal":
         raise OverviewError("Claude declined to summarize this filing.")

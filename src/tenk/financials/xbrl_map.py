@@ -37,6 +37,27 @@ class LineItem:
         return "instant" if self.statement == "balance" else "duration"
 
 
+# Rows highlighted in the app and in the Excel model: the main subtotals of each statement.
+KEY_ROWS = frozenset(
+    {
+        "revenue",
+        "gross_profit",
+        "operating_income",
+        "pretax_income",
+        "net_income",
+        "current_assets",
+        "total_assets",
+        "current_liabilities",
+        "total_liabilities",
+        "total_equity",
+        "cfo",
+        "cfi",
+        "cff",
+        "free_cash_flow",
+    }
+)
+
+
 def _diff(a: str, b: str) -> Callable[[dict[str, float]], float | None]:
     def compute(values: dict[str, float]) -> float | None:
         if a in values and b in values:

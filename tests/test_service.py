@@ -10,7 +10,10 @@ from tenk.cache import JsonCache
 from tenk.demo import example_company_facts
 from tenk.service import (
     DEMO_TICKER,
+    financial_digest,
     find_overview,
+    for_filing,
+    format_shares,
     format_usd,
     headlines,
     load_company,
@@ -18,7 +21,13 @@ from tenk.service import (
     saved_overview,
     write_overview,
 )
-from tenk.sources.edgar import COMPANY_FACTS_URL, SUBMISSIONS_URL, TICKERS_URL, EdgarClient
+from tenk.sources.edgar import (
+    COMPANY_FACTS_URL,
+    SUBMISSIONS_URL,
+    TICKERS_URL,
+    EdgarClient,
+    Filing,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -175,3 +184,31 @@ def test_demo_record_includes_news(apple):
     )
     assert record["news"]["saved_on"] == "2026-10-02"
     assert service.NewsMood.from_dict(record["news"]).articles == news.articles
+
+
+def test_for_filing_shows_an_earlier_report():
+    data = load_sample()
+    assert data.filings == []
+    periods = data.statements.periods
+    older = Filing("10-K", "0001-23-000001", "2023-02-01", periods[-2], "x.htm", "https://x")
+    earlier = for_filing(data, older)
+    assert earlier.statements.periods == periods[:-1]
+    assert earlier.ratios.columns.tolist() == periods[:-1]
+    assert earlier.latest_10k == older
+    assert data.statements.periods == periods  # the original is untouched
+
+
+def test_financial_digest_lists_changes_and_working_capital():
+    digest = financial_digest(load_sample())
+    assert "Revenue: $1.30B vs $1.20B (+8.3%)" in digest
+    assert "Working capital: $400.00M vs $360.00M (+11.1%)" in digest
+
+
+def test_financial_digest_includes_share_count():
+    assert "Diluted shares: 100.00M shares vs 100.00M shares" in financial_digest(load_sample())
+
+
+def test_format_shares():
+    assert format_shares(15_200_000) == "15.20M shares"
+    assert format_shares(1_020_000_000) == "1.02B shares"
+    assert format_shares(None) == "n/a"

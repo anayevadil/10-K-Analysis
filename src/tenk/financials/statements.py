@@ -40,6 +40,20 @@ class Statements:
     def periods(self) -> list[str]:
         return list(self.income.columns)
 
+    def up_to(self, period_end: str, years: int = 5) -> Statements:
+        """The last ``years`` fiscal years ending on or before ``period_end``."""
+        keep = [p for p in self.periods if p <= period_end][-years:]
+        if not keep:
+            return self
+        return Statements(
+            company=self.company,
+            cik=self.cik,
+            income=self.income[keep].dropna(how="all"),
+            balance=self.balance[keep].dropna(how="all"),
+            cash_flow=self.cash_flow[keep].dropna(how="all"),
+            sources={k: v for k, v in self.sources.items() if k[1] in keep},
+        )
+
     def value(self, key: str, period: str) -> float | None:
         for frame in (self.income, self.balance, self.cash_flow):
             if key in frame.index and period in frame.columns:
